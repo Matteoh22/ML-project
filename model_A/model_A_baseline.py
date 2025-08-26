@@ -13,8 +13,8 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 
 # ==== Config ====
-DATA_DIR = Path("/Users/matteohasa/Desktop/ML-project/rps-cv-images")
-OUT_DIR = Path("./outputs/model_A_compact"); OUT_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = Path("/Users/matteohasa/Desktop/ML-project1/rps-cv-images")
+OUT_DIR = Path("/Users/matteohasa/Desktop/ML-project/model_A"); OUT_DIR.mkdir(parents=True, exist_ok=True)
 IMG_SIZE = (64, 64); BATCH = 32; EPOCHS = 15; SEED = 42
 
 # ==== Datasets ====

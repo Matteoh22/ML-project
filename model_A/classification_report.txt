@@ -1,0 +1,10 @@
+Classification Report (Model A compact)
+              precision    recall  f1-score   support
+
+       paper     0.9863    0.8276    0.9000        87
+        rock     0.9580    0.9194    0.9383       124
+    scissors     0.8681    1.0000    0.9294       125
+
+    accuracy                         0.9256       336
+   macro avg     0.9374    0.9156    0.9225       336
+weighted avg     0.9319    0.9256    0.9250       336
