@@ -1,10 +1,10 @@
-Classification Report (Model C compact + scientific - final)
+Classification Report (Model C compact + scientific - FIXED)
               precision    recall  f1-score   support
 
-       paper     0.0000    0.0000    0.0000       107
-        rock     0.0000    0.0000    0.0000       109
-    scissors     0.3435    1.0000    0.5113       113
+       paper     1.0000    1.0000    1.0000       107
+        rock     1.0000    1.0000    1.0000       109
+    scissors     1.0000    1.0000    1.0000       113
 
-    accuracy                         0.3435       329
-   macro avg     0.1145    0.3333    0.1704       329
-weighted avg     0.1180    0.3435    0.1756       329
+    accuracy                         1.0000       329
+   macro avg     1.0000    1.0000    1.0000       329
+weighted avg     1.0000    1.0000    1.0000       329

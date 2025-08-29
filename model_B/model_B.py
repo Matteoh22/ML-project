@@ -1,153 +1,198 @@
 #!/usr/bin/env python3
 """
-Model B (intermediate, compact):
-- P2: 128x128, normalize with mean/std, moderate augmentation
-- CNN: Conv(32) → Conv(64) → MaxPool → Dropout →
-       Conv(128) → MaxPool → Flatten → Dense(128) → Softmax(3)
-- Split stratificato (train/val/test)
-- Output: best/final model + plots + report + confusion matrix
+Model B (compact + scientific): intermediate CNN
+- P2: 128x128, per-channel standardization (train mean/std), moderate augmentation (train only)
+- Strict stratified split (sklearn) + fixed seeds
+- Saves: best & final model, plots, confusion matrix, classification report
+- Tiny LR sweep (optional) to demonstrate hyperparameter tuning
 """
 
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report, confusion_matrix
+import random, numpy as np, matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.utils.class_weight import compute_class_weight
 import tensorflow as tf
-from tensorflow.keras import layers, models
-import random
 
-# ==== CONFIG ====
+# ==== Config ====
 DATA_DIR = Path("/Users/matteohasa/Desktop/ML-project/rps-cv-images")
-OUT_DIR  = Path("/Users/matteohasa/Desktop/ML-project/outputs/model_B")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR  = Path("/Users/matteohasa/Desktop/ML-project/model_B/outputs"); OUT_DIR.mkdir(parents=True, exist_ok=True)
+IMG_SIZE = (128, 128); BATCH = 32
+EPOCHS = 25; SEED = 42
+TEST_RATIO = 0.15; VAL_RATIO = 0.15
+BASE_LR = 1e-3
+AUTOTUNE = tf.data.AUTOTUNE
 
-IMG_SIZE = (128, 128)
-BATCH = 32
-SEED = 42
-EPOCHS = 20
-VAL_RATIO = 0.15
-TEST_RATIO = 0.15
+# ==== Seeds ====
+random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
 
-random.seed(SEED)
-np.random.seed(SEED)
-tf.random.set_seed(SEED)
-
-# ==== 1) Dataset: collect paths + labels ====
-exts = {".jpg",".jpeg",".png"}
-classes = sorted([d.name for d in DATA_DIR.iterdir() if d.is_dir()])
-cls2lab = {c:i for i,c in enumerate(classes)}
-
-X, y = [], []
-for cls in classes:
-    for f in (DATA_DIR/cls).rglob("*"):
+# ==== 1) Scan files & labels ====
+exts = {".jpg",".jpeg",".png",".bmp",".gif"}
+class_names = sorted([d.name for d in DATA_DIR.iterdir() if d.is_dir()])
+name2lab = {n:i for i,n in enumerate(class_names)}
+files, labs = [], []
+for cname in class_names:
+    for f in (DATA_DIR/cname).rglob("*"):
         if f.suffix.lower() in exts:
-            X.append(str(f)); y.append(cls2lab[cls])
-X = np.array(X); y = np.array(y)
+            files.append(str(f)); labs.append(name2lab[cname])
+if not files: raise RuntimeError(f"No images found in {DATA_DIR}")
 
-# Stratified split
-X_tmp, X_test, y_tmp, y_test = train_test_split(
-    X, y, test_size=TEST_RATIO, stratify=y, random_state=SEED
-)
+# ==== 2) Stratified split: test, then val from remaining ====
+X_tmp, X_test, y_tmp, y_test = train_test_split(files, labs, test_size=TEST_RATIO,
+                                                stratify=labs, random_state=SEED)
 val_rel = VAL_RATIO / (1.0 - TEST_RATIO)
-X_train, X_val, y_train, y_val = train_test_split(
-    X_tmp, y_tmp, test_size=val_rel, stratify=y_tmp, random_state=SEED
-)
+X_train, X_val, y_train, y_val = train_test_split(X_tmp, y_tmp, test_size=val_rel,
+                                                  stratify=y_tmp, random_state=SEED)
 
-# ==== 2) Precompute mean/std on train set ====
-def read_img(path):
+# ==== 3) Compute train mean/std (after resize to 128) ====
+def _read_resize(path):
     img = tf.io.read_file(path)
     img = tf.image.decode_image(img, channels=3, expand_animations=False)
-    img = tf.image.convert_image_dtype(img, tf.float32) # [0,1]
-    img = tf.image.resize(img, IMG_SIZE)
+    img = tf.image.convert_image_dtype(img, tf.float32)   # [0,1]
+    img = tf.image.resize(img, IMG_SIZE, antialias=True)
     return img
 
-imgs = np.stack([read_img(p).numpy() for p in X_train])
-mean = imgs.mean(axis=(0,1,2))
-std  = imgs.std(axis=(0,1,2))
-print("Train mean:", mean, "std:", std)
+means, sqmeans = [], []
+for p in X_train:
+    im = _read_resize(p)
+    means.append(tf.reduce_mean(im, axis=[0,1]).numpy())
+    sqmeans.append(tf.reduce_mean(tf.square(im), axis=[0,1]).numpy())
+mean = np.mean(np.stack(means), axis=0)
+sqm  = np.mean(np.stack(sqmeans), axis=0)
+std  = np.sqrt(np.maximum(sqm - mean**2, 1e-8))
+np.save(OUT_DIR/"train_mean.npy", mean); np.save(OUT_DIR/"train_std.npy", std)
 
-# ==== 3) Pipeline builder ====
-augment = tf.keras.Sequential([
-    layers.RandomFlip("horizontal"),
-    layers.RandomRotation(0.1),
-    layers.RandomZoom(0.1),
-])
+# ==== 4) tf.data pipelines (augment only on train) ====
+aug_layer = tf.keras.Sequential([
+    tf.keras.layers.RandomFlip("horizontal"),
+    tf.keras.layers.RandomRotation(0.1),
+    tf.keras.layers.RandomTranslation(0.1, 0.1),
+    tf.keras.layers.RandomZoom(0.1),
+    tf.keras.layers.RandomContrast(0.1),
+], name="data_augmentation")
 
-def map_fn(path, label, train=False):
-    img = read_img(path)
-    if train:
-        img = augment(tf.expand_dims(img,0), training=True)[0]
-    img = (img - mean) / std
+mean_t = tf.constant(mean, dtype=tf.float32)
+std_t  = tf.constant(std,  dtype=tf.float32)
+
+def _map_fn(path, label, augment=False):
+    img = _read_resize(path)
+    if augment:
+        img = aug_layer(tf.expand_dims(img,0), training=True)[0]
+    img = (img - mean_t) / tf.maximum(std_t, 1e-6)
     return img, label
 
-def make_ds(paths, labels, train=False):
-    ds = tf.data.Dataset.from_tensor_slices((paths, labels))
-    if train:
-        ds = ds.shuffle(buffer_size=len(paths), seed=SEED, reshuffle_each_iteration=True)
-    ds = ds.map(lambda p,y: map_fn(p,y,train), num_parallel_calls=tf.data.AUTOTUNE)
-    return ds.batch(BATCH).prefetch(tf.data.AUTOTUNE)
+def make_ds(paths, labels, shuffle=False, augment=False):
+    ds = tf.data.Dataset.from_tensor_slices((paths, np.array(labels, np.int32)))
+    if shuffle: ds = ds.shuffle(buffer_size=len(paths), seed=SEED, reshuffle_each_iteration=True)
+    ds = ds.map(lambda p,y: _map_fn(p,y,augment), num_parallel_calls=AUTOTUNE)
+    return ds.batch(BATCH).prefetch(AUTOTUNE)
 
-ds_train = make_ds(X_train, y_train, train=True)
-ds_val   = make_ds(X_val, y_val)
-ds_test  = make_ds(X_test, y_test)
+ds_train = make_ds(X_train, y_train, shuffle=True,  augment=True)
+ds_val   = make_ds(X_val,   y_val,   shuffle=False, augment=False)
+ds_test  = make_ds(X_test,  y_test,  shuffle=False, augment=False)
 
-# ==== 4) Model ====
-inputs = layers.Input(shape=(*IMG_SIZE,3))
-x = layers.Conv2D(32,3,activation="relu",padding="same")(inputs)
-x = layers.Conv2D(64,3,activation="relu",padding="same")(x)
-x = layers.MaxPooling2D()(x)
-x = layers.Dropout(0.25)(x)
-x = layers.Conv2D(128,3,activation="relu",padding="same")(x)
-x = layers.MaxPooling2D()(x)
-x = layers.Flatten()(x)
-x = layers.Dense(128,activation="relu")(x)
-outputs = layers.Dense(len(classes), activation="softmax")(x)
+# ==== 5) Model B (Conv-BN-ReLU blocks + Dropout) ====
+def build_model(num_classes:int)->tf.keras.Model:
+    inp = tf.keras.Input(shape=(*IMG_SIZE,3))
+    x = tf.keras.layers.Conv2D(32,3,padding="same",use_bias=False)(inp); x = tf.keras.layers.BatchNormalization()(x); x = tf.keras.layers.ReLU()(x); x = tf.keras.layers.MaxPooling2D()(x)
+    x = tf.keras.layers.Conv2D(64,3,padding="same",use_bias=False)(x);  x = tf.keras.layers.BatchNormalization()(x); x = tf.keras.layers.ReLU()(x); x = tf.keras.layers.MaxPooling2D()(x)
+    x = tf.keras.layers.Conv2D(128,3,padding="same",use_bias=False)(x); x = tf.keras.layers.BatchNormalization()(x); x = tf.keras.layers.ReLU()(x); x = tf.keras.layers.MaxPooling2D()(x)
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
+    x = tf.keras.layers.Dense(128, activation="relu")(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
+    out = tf.keras.layers.Dense(len(class_names), activation="softmax")(x)
+    return tf.keras.Model(inp, out, name="model_B_compact_scientific")
 
-model = models.Model(inputs, outputs, name="model_B_compact")
+# ==== 6) (Optional) tiny LR sweep for tuning ====
+def lr_sweep(lrs):
+    best_lr, best_val = None, -1
+    for lr in lrs:
+        m = build_model(len(class_names))
+        m.compile(optimizer=tf.keras.optimizers.Adam(lr), loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+        h = m.fit(ds_train, validation_data=ds_val, epochs=5, verbose=0)
+        cur = max(h.history["val_accuracy"])
+        print(f"[LR SWEEP] lr={lr:.5f} → best val_acc={cur:.4f}")
+        if cur > best_val: best_val, best_lr = cur, lr
+    print(f"[LR SWEEP] selected lr={best_lr}")
+    return best_lr
 
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(1e-3),
-    loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"]
-)
+best_lr = lr_sweep([BASE_LR/3, BASE_LR, BASE_LR*3])
 
-# ==== 5) Training ====
-ckpt_path = (OUT_DIR/"model_B_best.keras").as_posix()
-callbacks = [
-    tf.keras.callbacks.ModelCheckpoint(ckpt_path, monitor="val_loss", save_best_only=True),
-    tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True),
+# ==== 7) Train final model ====
+model = build_model(len(class_names))
+model.compile(optimizer=tf.keras.optimizers.Adam(best_lr),
+              loss="sparse_categorical_crossentropy",
+              metrics=["accuracy"])
+
+# optional class weights if imbalance >15%
+y_train_np = np.asarray(y_train, dtype=int)
+counts = np.bincount(y_train_np, minlength=len(class_names))
+print("Train counts per class:", {class_names[i]: int(c) for i, c in enumerate(counts)})
+
+dev = np.max(np.abs(counts - counts.mean()) / np.maximum(counts.mean(), 1e-8))
+class_weight = None
+
+# Calcola pesi SOLO se davvero sbilanciato e se tutte le classi sono presenti
+labels_present = np.unique(y_train_np)
+if dev > 0.15 and len(labels_present) == len(class_names):
+    w = compute_class_weight(
+        class_weight="balanced",
+        classes=labels_present,   # usa SOLO le classi presenti
+        y=y_train_np
+    )
+    class_weight = {int(c): float(wi) for c, wi in zip(labels_present, w)}
+    print("Using class weights:", class_weight)
+elif dev > 0.15:
+    print("⚠️ Imbalance rilevato ma manca almeno una classe nel train: salto class_weight.")
+
+ckpt = (OUT_DIR/"model_B_best.keras").as_posix()
+cbs = [
+    tf.keras.callbacks.ModelCheckpoint(ckpt, monitor="val_loss", save_best_only=True),
+    tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=7, restore_best_weights=True),
+    tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-6),
 ]
+hist = model.fit(ds_train, validation_data=ds_val, epochs=EPOCHS, callbacks=cbs,
+                 class_weight=class_weight, verbose=1)
 
-hist = model.fit(ds_train, validation_data=ds_val, epochs=EPOCHS, callbacks=callbacks, verbose=1)
-
-# ==== 6) Save final ====
 final_path = (OUT_DIR/"model_B_final.keras").as_posix()
 model.save(final_path)
+print(f"Saved best to: {ckpt}\nSaved final to: {final_path}")
 
-# ==== 7) Plots ====
+# ==== 8) Plots ====
 plt.figure(); plt.plot(hist.history["loss"]); plt.plot(hist.history["val_loss"])
-plt.legend(["train","val"]); plt.title("Loss"); plt.savefig(OUT_DIR/"loss.png"); plt.close()
+plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("Loss (train/val)"); plt.legend(["train","val"])
+plt.tight_layout(); plt.savefig((OUT_DIR/"training_loss.png").as_posix()); plt.close()
 
 plt.figure(); plt.plot(hist.history["accuracy"]); plt.plot(hist.history["val_accuracy"])
-plt.legend(["train","val"]); plt.title("Accuracy"); plt.savefig(OUT_DIR/"accuracy.png"); plt.close()
+plt.xlabel("Epoch"); plt.ylabel("Accuracy"); plt.title("Accuracy (train/val)"); plt.legend(["train","val"])
+plt.tight_layout(); plt.savefig((OUT_DIR/"training_accuracy.png").as_posix()); plt.close()
 
-# ==== 8) Eval ====
+# ==== 9) Test + report ====
 test_loss, test_acc = model.evaluate(ds_test, verbose=0)
-print(f"\nTest loss={test_loss:.4f}, acc={test_acc:.4f}")
+print(f"\nTest loss: {test_loss:.4f} | Test acc: {test_acc:.4f}")
 
 y_true, y_pred = [], []
-for xb,yb in ds_test:
-    p = model.predict(xb, verbose=0)
-    y_true.extend(yb.numpy()); y_pred.extend(np.argmax(p,axis=1))
+for x,y in ds_test:
+    p = model.predict(x, verbose=0)
+    y_true.extend(y.numpy()); y_pred.extend(np.argmax(p, axis=1))
+rep = classification_report(y_true, y_pred, target_names=class_names, digits=4)
+with open(OUT_DIR/"classification_report.txt","w",encoding="utf-8") as f:
+    f.write("Classification Report (Model B compact + scientific)\n"); f.write(rep)
 
-report = classification_report(y_true, y_pred, target_names=classes, digits=4)
-with open(OUT_DIR/"classification_report.txt","w") as f: f.write(report)
-
-cm = confusion_matrix(y_true, y_pred)
-plt.figure(); plt.imshow(cm, cmap="Blues"); plt.title("Confusion Matrix")
-plt.xticks(range(len(classes)), classes, rotation=45); plt.yticks(range(len(classes)), classes)
+cm = confusion_matrix(y_true, y_pred, labels=list(range(len(class_names))))
+plt.figure(); plt.imshow(cm, interpolation="nearest"); plt.title("Confusion Matrix (Model B)")
+plt.colorbar(); ticks=np.arange(len(class_names))
+plt.xticks(ticks, class_names, rotation=45, ha="right"); plt.yticks(ticks, class_names)
+plt.xlabel("Predicted"); plt.ylabel("True")
 for i in range(cm.shape[0]):
     for j in range(cm.shape[1]):
-        plt.text(j,i,cm[i,j],ha="center",va="center")
-plt.tight_layout(); plt.savefig(OUT_DIR/"confusion_matrix.png"); plt.close()
+        plt.text(j,i,str(cm[i,j]),ha="center",va="center")
+plt.tight_layout(); plt.savefig((OUT_DIR/"confusion_matrix.png").as_posix()); plt.close()
+
+with open(OUT_DIR/"README_Model_B_compact_scientific.txt","w",encoding="utf-8") as f:
+    f.write("Model B compact + scientific summary:\n"
+            "- 128x128, per-channel standardization (train mean/std), moderate aug.\n"
+            "- 3x [Conv-BN-ReLU-MaxPool] → Flatten → Dropout → Dense(128) → Dropout → Softmax.\n"
+            "- EarlyStopping, ReduceLROnPlateau, checkpoint; tiny LR sweep.\n")
+print("All outputs saved in:", OUT_DIR.resolve())
