@@ -15,7 +15,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 
 # === CONFIG ===
-DATA_DIR  = Path("/Users/matteohasa/Desktop/ML-project1/rps-cv-images")   # dataset originale
+DATA_DIR  = Path("/Users/matteohasa/Desktop/ML-project/rps-cv-images")   # dataset originale
 SPLIT_DIR = Path("/Users/matteohasa/Desktop/ML-project/model_A/model_A-images_splits_balanced")  # dove copiamo gli split
 MODEL_DIR = Path("/Users/matteohasa/Desktop/ML-project/model_A/outputs")  # dove salviamo modelli/plot
 SPLITS = {"train": 0.7, "val": 0.15, "test": 0.15}
