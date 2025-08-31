@@ -1,10 +1,9 @@
-Classification Report (Model B compact + scientific)
               precision    recall  f1-score   support
 
-       paper     1.0000    0.9346    0.9662       107
-        rock     0.9646    1.0000    0.9820       109
-    scissors     0.9741    1.0000    0.9869       113
+       paper     1.0000    0.9720    0.9858       107
+        rock     0.9820    1.0000    0.9909       109
+    scissors     0.9825    0.9912    0.9868       113
 
-    accuracy                         0.9787       329
-   macro avg     0.9796    0.9782    0.9784       329
-weighted avg     0.9794    0.9787    0.9785       329
+    accuracy                         0.9878       329
+   macro avg     0.9881    0.9877    0.9878       329
+weighted avg     0.9880    0.9878    0.9878       329
