@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os, json, time, uuid
 import cv2
 import numpy as np
@@ -13,27 +10,26 @@ SAVE_DIR   = "/Users/matteohasa/Desktop/ML-project/realtime/captures"
 DEFAULT_CLASS_NAMES = ["paper", "rock", "scissors"]
 
 # Trigger & shots
-HAND_STABLE_FRAMES   = 10     # number of consecutive frames with a detected hand before triggering
-NUM_SHOTS            = 10     # how many images to capture in sequence
-SHOT_INTERVAL_SEC    = 0.10   # interval between shots (seconds)
-REARM_NO_HAND_FRAMES = 120    # after a capture, wait this many frames without a hand before rearming
+HAND_STABLE_FRAMES   = 10     
+NUM_SHOTS            = 10     
+SHOT_INTERVAL_SEC    = 0.10   
+REARM_NO_HAND_FRAMES = 120    
 
 # Prediction
-CONF_THRESHOLD = 0.50         # below this confidence, mark as "Not sure" or fallback to voting
-NORM_MODE      = 0            # 0 = divide by 255 ; 1 = EfficientNet preprocess
-USE_SMOOTHING  = False        # smoothing not needed here, but kept for completeness
+CONF_THRESHOLD = 0.50         
+NORM_MODE      = 0            
+USE_SMOOTHING  = False        
 SMOOTH_ALPHA   = 0.6
 
 # UX / UI
-MIRROR_VIEW = True            # mirror webcam image
-DRAW_DEBUG  = True            # draw hand landmarks and bounding box
-SAVE_SHOTS  = True            # save captured images
+MIRROR_VIEW = True            
+DRAW_DEBUG  = True            
+SAVE_SHOTS  = True            
 WINDOW_MAIN = "RPS — Snap & Predict (HUD)"
-# ==================================================
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# ---------- Keras custom layer for EfficientNet preprocessing ----------
+# Keras custom layer for EfficientNet preprocessing
 from tensorflow.keras.utils import register_keras_serializable
 from tensorflow.keras import layers
 from tensorflow.keras.applications import efficientnet
@@ -46,7 +42,7 @@ class EfficientNetPreprocess(layers.Layer):
     def get_config(self):
         return {}
 
-# ---------- Load model (with safe_mode handling for Keras 3) ----------
+# Load model
 try:
     model = tf.keras.models.load_model(
         MODEL_PATH,
@@ -56,7 +52,7 @@ except Exception as e:
     print(f"[load_model] {e}\nRetrying with safe_mode=False ...")
     model = tf.keras.models.load_model(MODEL_PATH, safe_mode=False)
 
-# Input image size (try to read from model, fallback to 224x224)
+# Input image size
 try:
     INP_H, INP_W = model.input_shape[1], model.input_shape[2]
     if INP_H is None or INP_W is None:
@@ -64,7 +60,7 @@ try:
 except Exception:
     INP_H, INP_W = 224, 224  # default for EfficientNetB0
 
-# Load class names (if JSON file is present next to the model)
+# Load class names
 class_names = DEFAULT_CLASS_NAMES
 try:
     classes_json = os.path.join(os.path.dirname(MODEL_PATH), "class_names.json")
@@ -76,14 +72,14 @@ try:
 except Exception:
     pass
 
-# ---------- Normalization runtime function ----------
+# Normalization runtime function
 def apply_normalization(img_rgb_float01, mode: int):
     if mode == 0:
         return img_rgb_float01          # just scale to [0,1]
     # EfficientNet preprocess expects [0,255]
     return efficientnet.preprocess_input(img_rgb_float01 * 255.0)
 
-# ---------- MediaPipe Hands ----------
+# MediaPipe Hands
 mp_hands = mp.solutions.hands
 mp_draw  = mp.solutions.drawing_utils
 hands = mp_hands.Hands(
@@ -91,7 +87,7 @@ hands = mp_hands.Hands(
     min_detection_confidence=0.5, min_tracking_confidence=0.5
 )
 
-# ===================== UI / HUD helpers =====================
+# UI / HUD helpers
 PALETTE = {
     "paper":   (255, 180,  40),   # orange
     "rock":    ( 60, 180, 255),   # blue
@@ -160,11 +156,11 @@ def draw_hud(frame, *, fps, hand_found, stable_frames, required_frames,
             put_label(frame, f"{p*100:5.1f}%", (x0+90+210+8, y+12), 0.55)
             y += 22
 
-    # final message (result after sequence of shots)
+    # final message
     if final_msg:
         put_label(frame, final_msg, (12, h-12), 0.7, PALETTE["ok"], 2)
 
-# ===================== Utils: crop & prediction =====================
+# Utils: crop & prediction
 def crop_expand_to_square(img_bgr, x1, y1, x2, y2, pad_ratio=0.22):
     """Crop hand bounding box to square with padding. If touching border, add letterbox."""
     h, w = img_bgr.shape[:2]
@@ -194,7 +190,7 @@ def majority_vote(labels: list[int]) -> int:
     counts = np.bincount(np.array(labels, dtype=int), minlength=len(class_names))
     return int(np.argmax(counts))
 
-# ===================== Main loop =====================
+# Main loop
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("Cannot open webcam (index=0).")
