@@ -1,10 +1,9 @@
-Classification Report (Model A compact, balanced splits)
               precision    recall  f1-score   support
 
-       paper     0.9712    0.9352    0.9528       108
-        rock     0.8908    0.9815    0.9339       108
-    scissors     0.9505    0.8889    0.9187       108
+       paper     0.9881    0.9540    0.9708        87
+        rock     0.9841    1.0000    0.9920       124
+    scissors     0.9841    0.9920    0.9880       125
 
-    accuracy                         0.9352       324
-   macro avg     0.9375    0.9352    0.9351       324
-weighted avg     0.9375    0.9352    0.9351       324
+    accuracy                         0.9851       336
+   macro avg     0.9854    0.9820    0.9836       336
+weighted avg     0.9852    0.9851    0.9850       336

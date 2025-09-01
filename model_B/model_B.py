@@ -175,7 +175,7 @@ if dev > 0.15 and len(labels_present) == len(class_names):
 ckpt_path = (OUT_DIR / "model_B_best.keras").as_posix()
 callbacks = [
     tf.keras.callbacks.ModelCheckpoint(ckpt_path, monitor="val_loss", save_best_only=True),
-    tf.keras.callbacks.EarlyStopping(monitor="val_loss", min_delta=0.02, patience=3, restore_best_weights=True),
+    tf.keras.callbacks.EarlyStopping(monitor="val_loss", min_delta=0.005, patience=3, restore_best_weights=True),
     tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-6),
 ]
 
@@ -218,7 +218,7 @@ with open(OUT_DIR / "classification_report.txt", "w", encoding="utf-8") as f:
     f.write(report)
 
 cm = confusion_matrix(y_true, y_pred, labels=list(range(len(class_names))))
-plt.imshow(cm, interpolation="nearest"); plt.title("Confusion Matrix (Model B)")
+plt.imshow(cm, interpolation="nearest",  cmap="Blues"); plt.title("Confusion Matrix (Model B)")
 plt.colorbar(); ticks = np.arange(len(class_names))
 plt.xticks(ticks, class_names, rotation=45, ha="right"); plt.yticks(ticks, class_names)
 plt.xlabel("Predicted"); plt.ylabel("True")

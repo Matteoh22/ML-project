@@ -80,36 +80,69 @@ plt.plot(history.history["val_loss"], label="val")
 plt.legend(); plt.title("Loss")
 plt.savefig(OUT_DIR / "loss.png"); plt.close()
 
-# Test + Report
+# Test + Report + save errors
+from PIL import Image
+
 test_loss, test_acc = model.evaluate(test_ds, verbose=0)
 print(f"Test acc = {test_acc:.4f}")
 
-y_true, y_pred = [], []
-for x, y in test_ds:
-    p = model.predict(x, verbose=0)
-    y_true.extend(y.numpy())
-    y_pred.extend(np.argmax(p, axis=1))
+errors_dir = OUT_DIR / "errors"
+if errors_dir.exists():
+    shutil.rmtree(errors_dir)
+errors_dir.mkdir(parents=True, exist_ok=True)
 
-report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
-with open(OUT_DIR / "classification_report.txt", "w") as f:
+y_true, y_pred = [], []
+err_count = 0
+sample_idx = 0  # contatore globale per dare nomi univoci ai file
+
+for xb, yb in test_ds:  # xb: (B,H,W,3) in [0,1], yb: (B,)
+    probs = model.predict(xb, verbose=0)         # (B,C)
+    preds = np.argmax(probs, axis=1)             # (B,)
+
+    yb_np = yb.numpy().astype(int)
+    y_true.extend(yb_np.tolist())
+    y_pred.extend(preds.tolist())
+
+    # salva i misclassificati come immagini su disco
+    xb_np = (xb.numpy() * 255.0).astype(np.uint8)  # back to uint8 for saving
+    for i in range(xb_np.shape[0]):
+        true_i = int(yb_np[i])
+        pred_i = int(preds[i])
+        if true_i != pred_i:
+            true_name = class_names[true_i]
+            pred_name = class_names[pred_i]
+            dst = errors_dir / true_name / f"pred_{pred_name}"
+            dst.mkdir(parents=True, exist_ok=True)
+            # nome file univoco
+            fname = f"err_{sample_idx:06d}_true-{true_name}_pred-{pred_name}.jpg"
+            Image.fromarray(xb_np[i]).save(dst / fname)
+            err_count += 1
+        sample_idx += 1
+
+print(f"Saved {err_count} misclassified images under: {errors_dir}")
+
+# Classification report
+report = classification_report(
+    y_true, y_pred,
+    labels=list(range(len(class_names))),
+    target_names=class_names,
+    digits=4,
+    zero_division=0
+)
+with open(OUT_DIR / "classification_report.txt", "w", encoding="utf-8") as f:
     f.write(report)
-# Confusion Matrix
-cm = confusion_matrix(y_true, y_pred)
-plt.imshow(cm, interpolation="nearest"); plt.title("Confusion Matrix")
-plt.colorbar(); plt.xticks(range(len(class_names)), class_names, rotation=45)
+
+# Confusion Matrix (Blues)
+cm = confusion_matrix(y_true, y_pred, labels=list(range(len(class_names))))
+plt.imshow(cm, interpolation="nearest", cmap="Blues")
+plt.title("Confusion Matrix")
+plt.colorbar()
+plt.xticks(range(len(class_names)), class_names, rotation=45)
 plt.yticks(range(len(class_names)), class_names)
 plt.xlabel("Predicted"); plt.ylabel("True")
 for i in range(len(class_names)):
     for j in range(len(class_names)):
         plt.text(j, i, cm[i, j], ha="center", va="center")
-plt.tight_layout(); plt.savefig(OUT_DIR / "confusion_matrix.png"); plt.close()
-
-# Saving Errors
-errors_dir = OUT_DIR / "errors"
-if errors_dir.exists(): shutil.rmtree(errors_dir)
-for true, pred in zip(y_true, y_pred):
-    if true != pred:
-        t, p = class_names[true], class_names[pred]
-        (errors_dir / t / f"pred_{p}").mkdir(parents=True, exist_ok=True)
-
-print("Done! Errors saved in:", errors_dir)
+plt.tight_layout()
+plt.savefig(OUT_DIR / "confusion_matrix.png")
+plt.close()

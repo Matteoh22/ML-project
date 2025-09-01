@@ -171,7 +171,7 @@ with open(OUT_DIR / "classification_report.txt", "w") as f:
     f.write(report)
 
 cm = confusion_matrix(y_true, y_pred)
-plt.imshow(cm, interpolation="nearest"); plt.title("Confusion Matrix (Model C)")
+plt.imshow(cm, interpolation="nearest",  cmap="Blues"); plt.title("Confusion Matrix (Model C)")
 plt.colorbar(); plt.xticks(range(len(class_names)), class_names, rotation=45)
 plt.yticks(range(len(class_names)), class_names)
 plt.xlabel("Predicted"); plt.ylabel("True")
