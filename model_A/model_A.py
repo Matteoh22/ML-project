@@ -93,18 +93,18 @@ errors_dir.mkdir(parents=True, exist_ok=True)
 
 y_true, y_pred = [], []
 err_count = 0
-sample_idx = 0  # contatore globale per dare nomi univoci ai file
+sample_idx = 0  
 
-for xb, yb in test_ds:  # xb: (B,H,W,3) in [0,1], yb: (B,)
-    probs = model.predict(xb, verbose=0)         # (B,C)
-    preds = np.argmax(probs, axis=1)             # (B,)
+for xb, yb in test_ds:  
+    probs = model.predict(xb, verbose=0)         
+    preds = np.argmax(probs, axis=1)             
 
     yb_np = yb.numpy().astype(int)
     y_true.extend(yb_np.tolist())
     y_pred.extend(preds.tolist())
 
-    # salva i misclassificati come immagini su disco
-    xb_np = (xb.numpy() * 255.0).astype(np.uint8)  # back to uint8 for saving
+    # Save errors
+    xb_np = (xb.numpy() * 255.0).astype(np.uint8)  
     for i in range(xb_np.shape[0]):
         true_i = int(yb_np[i])
         pred_i = int(preds[i])
@@ -113,7 +113,6 @@ for xb, yb in test_ds:  # xb: (B,H,W,3) in [0,1], yb: (B,)
             pred_name = class_names[pred_i]
             dst = errors_dir / true_name / f"pred_{pred_name}"
             dst.mkdir(parents=True, exist_ok=True)
-            # nome file univoco
             fname = f"err_{sample_idx:06d}_true-{true_name}_pred-{pred_name}.jpg"
             Image.fromarray(xb_np[i]).save(dst / fname)
             err_count += 1

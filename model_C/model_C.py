@@ -29,7 +29,7 @@ AUTOTUNE   = tf.data.AUTOTUNE
 
 random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
 
-# === Dataset scan & split ===
+# Dataset scan & split
 exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
 class_names = sorted([d.name for d in DATA_DIR.iterdir() if d.is_dir()])
 name2lab = {n: i for i, n in enumerate(class_names)}

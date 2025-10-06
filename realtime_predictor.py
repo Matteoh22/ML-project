@@ -4,7 +4,7 @@ import numpy as np
 import mediapipe as mp
 import tensorflow as tf
 
-# ===================== CONFIG =====================
+# CONFIG
 MODEL_PATH = "/Users/matteohasa/Desktop/ML-project/model_C/outputs/model_C_final.keras"
 SAVE_DIR   = "/Users/matteohasa/Desktop/ML-project/realtime/captures"
 DEFAULT_CLASS_NAMES = ["paper", "rock", "scissors"]
